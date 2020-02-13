@@ -19,7 +19,7 @@ The pydensecrf library had issues installing on my system via `pip install pyden
 
 The following will load the model checkpoint at `saved_models/mario_overfit.pth`, run `overfit.png` through the model, and display the resulting images and mask
 ```
-python train.py --resume 'saved_models/mario_overfit.pth' --test-only --visualize
+python train.py --checkpoint 'saved_models/mario_overfit.pth' --test-only --visualize
 ```
 
 ## Overfit Training

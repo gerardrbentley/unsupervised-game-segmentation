@@ -43,7 +43,7 @@ class OverfitDataset(torch.utils.data.Dataset):
         self.image_file = root
         self.length = num_images
         if train_or_val == "val":
-            self.length = 1
+            self.length = 3
         self.transform = transform
 
     def __len__(self):
