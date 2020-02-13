@@ -4,7 +4,6 @@ import glob
 import os
 
 import torch
-from torchvision import transforms
 
 import input_target_transforms as TT
 from visualize import visualize_outputs
@@ -13,7 +12,7 @@ from visualize import visualize_outputs
 # Transforms should include ToTensor (also probably Normalize)
 # Can apply different transform to output, returns image as input and label
 class GameImagesDataset(torch.utils.data.Dataset):
-    def __init__(self, root='/faim/datasets/test_icarus', train_or_val="train", transform=transforms.ToTensor()):
+    def __init__(self, root='/faim/datasets/test_icarus', train_or_val="train", transform=TT.ToTensor()):
         self.image_dir = os.path.join(root)
         # Get abs file paths
         self.image_list = glob.glob(f'{self.image_dir}/*.png')
@@ -40,7 +39,7 @@ class GameImagesDataset(torch.utils.data.Dataset):
         return sample
 
 class OverfitDataset(torch.utils.data.Dataset):
-    def __init__(self, root='/faim/datasets/test_mario/1.png', train_or_val="train", transform=transforms.ToTensor(), num_images=2000):
+    def __init__(self, root='./overfit.png', train_or_val="train", transform=TT.ToTensor(), num_images=2000):
         self.image_file = root
         self.length = num_images
         if train_or_val == "val":

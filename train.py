@@ -3,9 +3,7 @@ import os
 import time
 
 import torch
-import torch.utils.data
 from torch import nn
-import torchvision
 
 import input_target_transforms as TT
 import distributed_utils
@@ -13,32 +11,41 @@ import distributed_utils
 from models import WNet
 from loss import NCutLoss2D, OpeningLoss2D
 from visualize import visualize_outputs
+from crf import crf_batch_fit_predict
 
-# from src.crf import crf_batch_fit_predict
 from datasets import GameImagesDataset, OverfitDataset
 
 # Reference Training Script and Utils: https://github.com/pytorch/vision/tree/master/references
 
 def get_dataset(name, train_or_val, transform):
     paths = {
-        "test_mario": ('/faim/datasets/test_mario', GameImagesDataset, 0),
-        "overfit": ('/faim/datasets/test_mario/1.png', OverfitDataset, 0),
-        "mario": ('/faim/datasets/mario_images', GameImagesDataset, 0)
+        "overfit": ('./overfit.png', OverfitDataset),
+        "test_mario": ('/faim/datasets/test_mario', GameImagesDataset),
+        "mario": ('/faim/datasets/mario_images', GameImagesDataset)
     }
-    p, ds_fn, num_classes = paths[name]
+    p, ds_fn = paths[name]
 
     ds = ds_fn(root=p, train_or_val=train_or_val, transform=transform)
-    return ds, num_classes
+    return ds
 
 
 def get_transform(train):
+    base_size = 224
+    crop_size = 180
 
     transforms = []
-    transforms.append(TT.CenterCrop(224))
     if train:
+        min_size = int(0.5 * base_size)
+        max_size = int(2.0 * base_size)
+
+        transforms.append(TT.RandomResize(min_size, max_size))
+        
         transforms.append(TT.RandomHorizontalFlip(0.5))
         transforms.append(TT.RandomVerticalFlip(0.5))
-        # transforms.append(TT.RandomCrop(crop_size))
+
+        transforms.append(TT.RandomCrop(crop_size))
+
+    transforms.append(TT.Resize(base_size))
     transforms.append(TT.ToTensor())
     transforms.append(TT.Normalize(mean=[0.485, 0.456, 0.406],
                                   std=[0.229, 0.224, 0.225]))
@@ -125,11 +132,12 @@ def visualize(model, dataset, device):
     reconstruction = reconstruction.detach().cpu().numpy()
     mask = mask.detach().cpu().numpy()
 
-    # new_mask = crf_batch_fit_predict(mask, input_image)
+    new_mask = crf_batch_fit_predict(mask, input_image)
     print(mask.shape)
+    print(new_mask.shape)
     print(input_image.shape)
     print(targ.shape)
-    visualize_outputs(input_image, targ, reconstruction, mask.argmax(1), targ,
+    visualize_outputs(input_image, targ, reconstruction, mask.argmax(1), new_mask.argmax(1),
                       titles=['Image', 'Target', 'AE Output', 'Raw Mask', 'CRF Mask'])
 
 def main(args):
@@ -141,10 +149,13 @@ def main(args):
 
     device = torch.device(args.device)
 
-    dataset, num_classes = get_dataset(args.dataset, "train", get_transform(train=True))
-    dataset_test, _ = get_dataset(args.dataset, "val", get_transform(train=False))
+    if args.no_augmentation:
+        dataset = get_dataset(args.dataset, "train", get_transform(train=False))
+    else:
+        dataset = get_dataset(args.dataset, "train", get_transform(train=True))
+    dataset_test = get_dataset(args.dataset, "val", get_transform(train=False))
     print(f'len train set: {len(dataset)} ; len test set: {len(dataset_test)}')
-    # dataset_test = OverfitDataset(num_images=30, input_transform=get_transform(train=False), target_transform=get_transform(train=False))
+
     if args.distributed:
         train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)
         test_sampler = torch.utils.data.distributed.DistributedSampler(dataset_test)
@@ -181,7 +192,7 @@ def main(args):
         eval_result = evaluate(model, data_loader_test, device=device, num_classes=num_classes)
         print(eval_result)
         if args.do_visualize:
-            visualize(model, dataset, device)
+            visualize(model, dataset_test, device)
         return
 
     params_to_optimize = [
@@ -225,13 +236,13 @@ def main(args):
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
     if args.do_visualize:
-        visualize(model, dataset, device)
+        visualize(model, dataset_test, device)
 
 def parse_args():
     import argparse
     parser = argparse.ArgumentParser(description='PyTorch Segmentation Training')
 
-    parser.add_argument('--dataset', default='test_mario', help='dataset')
+    parser.add_argument('--dataset', default='overfit', help='dataset')
     parser.add_argument('--model', default='wnet', help='model')
     parser.add_argument('--aux-loss', action='store_true', help='auxiliar loss')
     parser.add_argument('--device', default='cuda', help='device')
@@ -254,6 +265,12 @@ def parse_args():
         "--test-only",
         dest="test_only",
         help="Only test the model",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--no-aug",
+        dest="no_augmentation",
+        help="Don't augment training images",
         action="store_true",
     )
     parser.add_argument(
