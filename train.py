@@ -77,7 +77,7 @@ def criterion(inputs, target):
     # return losses['out'] + 0.5 * losses['aux']
 
 
-def evaluate(model, data_loader, device, num_classes):
+def evaluate(model, data_loader, device):
     model.eval()
     eval_result = distributed_utils.SmoothedValue()
     metric_logger = distributed_utils.MetricLogger(delimiter="  ")
@@ -189,7 +189,7 @@ def main(args):
         model_without_ddp = model.module
 
     if args.test_only:
-        eval_result = evaluate(model, data_loader_test, device=device, num_classes=num_classes)
+        eval_result = evaluate(model, data_loader_test, device=device)
         print(eval_result)
         if args.do_visualize:
             visualize(model, dataset_test, device)
@@ -220,7 +220,7 @@ def main(args):
             train_sampler.set_epoch(epoch)
         train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, device, epoch, args.print_freq)
         if data_loader_test is not None:
-            eval_result = evaluate(model, data_loader_test, device=device, num_classes=num_classes)
+            eval_result = evaluate(model, data_loader_test, device=device)
             print(eval_result)
 
         distributed_utils.save_on_master(

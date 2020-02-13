@@ -12,7 +12,7 @@ from visualize import visualize_outputs
 # Transforms should include ToTensor (also probably Normalize)
 # Can apply different transform to output, returns image as input and label
 class GameImagesDataset(torch.utils.data.Dataset):
-    def __init__(self, root='/faim/datasets/test_icarus', train_or_val="train", transform=TT.ToTensor()):
+    def __init__(self, root='/faim/datasets/per_game_screenshots/super_mario_bros_3_usa', train_or_val="train", transform=TT.ToTensor()):
         self.image_dir = os.path.join(root)
         # Get abs file paths
         self.image_list = glob.glob(f'{self.image_dir}/*.png')
