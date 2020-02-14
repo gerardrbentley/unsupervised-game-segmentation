@@ -38,6 +38,24 @@ class GameImagesDataset(torch.utils.data.Dataset):
         sample = {'image': image, 'target': target}
         return sample
 
+class GameFoldersDataset(torch.utils.data.Dataset):
+    def __init__(self, root='/faim/datasets/per_game_screenshots/', train_or_val="train", transform=TT.ToTensor()):
+        self.image_folders = next(os.walk(self.image_dir))[1]
+        sets = []
+        for game_folder in image_folders:
+            sets.append(GameImagesDataset(root=os.path.join(root, game_folder), train_or_val=train_or_val, transform=transform))
+        
+        self.full_dataset = torch.utils.data.ConcatDataset(sets)
+        if train_or_val == "val":
+            self.image_list = self.image_list[:int(len(self.image_list) * 0.2)]
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.full_dataset)
+
+    def __getitem__(self, idx):
+        return self.full_dataset[idx]
+
 class OverfitDataset(torch.utils.data.Dataset):
     def __init__(self, root='./overfit.png', train_or_val="train", transform=TT.ToTensor(), num_images=2000):
         self.image_file = root

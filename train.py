@@ -13,7 +13,7 @@ from loss import NCutLoss2D, OpeningLoss2D
 from visualize import visualize_outputs, matplotlib_imshow
 from crf import crf_batch_fit_predict
 
-from datasets import GameImagesDataset, OverfitDataset
+from datasets import GameImagesDataset, GameFoldersDataset, OverfitDataset
 
 # Reference Training Script and Utils: https://github.com/pytorch/vision/tree/master/references
 
@@ -24,7 +24,8 @@ def get_dataset(name, train_or_val, transform):
     paths = {
         "overfit": ('./overfit.png', OverfitDataset),
         "test_mario": ('/faim/datasets/test_mario', GameImagesDataset),
-        "mario": ('/faim/datasets/mario_images', GameImagesDataset)
+        "mario": ('/faim/datasets/mario_images', GameImagesDataset),
+        "blap": ('/faim/datasets/blap_images', GameFoldersDataset)
     }
     p, ds_fn = paths[name]
 
@@ -106,17 +107,17 @@ def evaluate(model, data_loader, device, epoch=0, writer=None):
                 writer.add_scalar('Loss/Validation', loss_item, global_step=step)
             
 
-                if i in [0]:
-                    mask, reconstruction = output['mask'], output['reconstruction']
-                    mask = mask.detach().cpu().numpy()
-                    reconstruction = reconstruction.detach().cpu().numpy()
-                    image = image.detach().cpu().numpy()
-                    target = target.detach().cpu().numpy()
+                # if i in [0]:
+                #     mask, reconstruction = output['mask'], output['reconstruction']
+                #     mask = mask.detach().cpu().numpy()
+                #     reconstruction = reconstruction.detach().cpu().numpy()
+                #     image = image.detach().cpu().numpy()
+                #     target = target.detach().cpu().numpy()
 
-                    new_mask = crf_batch_fit_predict(mask, image)
-                    visualize_images = [image, target, reconstruction, mask.argmax(1), new_mask.argmax(1)]
-                    img_grid = torchvision.utils.make_grid(visualize_images, nrow=6, normalize=True)
-                    writer.add_image('Validation_Sample', img_grid, global_step=step)
+                #     new_mask = crf_batch_fit_predict(mask, image)
+                #     visualize_images = [image, target, reconstruction, mask.argmax(1), new_mask.argmax(1)]
+                #     img_grid = torchvision.utils.make_grid(visualize_images, nrow=6, normalize=True)
+                #     writer.add_image('Validation_Sample', img_grid, global_step=step)
 
         # eval_result.synchronize_between_processes()
     return eval_result
