@@ -4,21 +4,21 @@ import time
 
 import torch
 from torch import nn
+import torchvision
 
 import input_target_transforms as TT
 import distributed_utils
 
+from ml_args import parse_args
 from models import WNet
 from loss import NCutLoss2D, OpeningLoss2D
-from visualize import visualize_outputs, matplotlib_imshow
+from visualize import visualize_outputs, matplotlib_imshow, argmax_to_rgb
 from crf import crf_batch_fit_predict
 
 from datasets import GameImagesDataset, GameFoldersDataset, OverfitDataset
 
 # Reference Training Script and Utils: https://github.com/pytorch/vision/tree/master/references
 
-DEFAULT_MEAN = [0.485, 0.456, 0.406]
-DEFAULT_STD = [0.229, 0.224, 0.225]
 
 def get_dataset(name, train_or_val, transform):
     paths = {
@@ -33,6 +33,10 @@ def get_dataset(name, train_or_val, transform):
     return ds
 
 
+
+# TODO verify these normalizations work well for pixelated games
+DEFAULT_MEAN = [0.485, 0.456, 0.406]
+DEFAULT_STD = [0.229, 0.224, 0.225]
 def get_transform(train):
     base_size = 224
     crop_size = 180
@@ -56,71 +60,80 @@ def get_transform(train):
 
     return TT.Compose(transforms)
 
-
+# TODO verify these weights from W-Net implementation
+# Weights for NCutLoss2D, MSELoss, and OpeningLoss2D, respectively
+ALPHA, BETA, GAMMA = 1e-3, 1, 1e-1
 def criterion(inputs, target):
     result_masks, result_reconstructions = inputs["mask"], inputs["reconstruction"]
     
     result_reconstructions = result_reconstructions.contiguous()
     target = target.contiguous()
 
-    # Weights for NCutLoss2D, MSELoss, and OpeningLoss2D, respectively
-    alpha, beta, gamma = 1e-3, 1, 1e-1
-    ncut_loss = alpha * NCutLoss2D()(result_masks, target)
-    mse_loss = beta * nn.MSELoss()(result_reconstructions, target.detach())
-    smooth_loss = gamma * OpeningLoss2D()(result_masks)
-    loss = ncut_loss + mse_loss + smooth_loss
     
-    return loss
+    soft_cut_loss = ALPHA * NCutLoss2D()(result_masks, target)
+    reconstr_loss = BETA * nn.MSELoss()(result_reconstructions, target.detach())
+    smooth_loss = GAMMA * OpeningLoss2D()(result_masks)
+    total_loss = soft_cut_loss + reconstr_loss + smooth_loss
+    
+    return total_loss, soft_cut_loss, reconstr_loss, smooth_loss
 
-    # for name, x in inputs.items():
-    #     losses[name] = nn.functional.cross_entropy(x, target, ignore_index=255)
-
-    # if len(losses) == 1:
-    #     return losses['out']
-
-    # return losses['out'] + 0.5 * losses['aux']
-
-
+# TODO put in it's own file
 def evaluate(model, data_loader, device, epoch=0, writer=None):
     model.eval()
-    eval_result = distributed_utils.SmoothedValue()
     metric_logger = distributed_utils.MetricLogger(delimiter="  ")
     header = 'Test:'
 
     with torch.no_grad():
         for data, i in metric_logger.log_every(data_loader, 20, header):
-            if args.distributed:
-                step = epoch * len(data_loader) * args.world_size + i
-            else:
-                step = epoch * len(data_loader) + i
+        
+            step = epoch * len(data_loader.dataset) + i
 
             image, target = data['image'], data['target']
             image, target = image.to(device), target.to(device)
             output = model(image)
-            loss = criterion(output, target)
+            total_loss, soft_cut_loss, reconstr_loss, smooth_loss = criterion(output, target)
 
-            loss_item = loss.item()
-            metric_logger.update(loss=loss_item)
-            eval_result.update(loss_item)
+            loss_item = total_loss.item()
+            metric_logger.update(total_loss=loss_item, soft_cut_loss=soft_cut_loss, reconstr_loss=reconstr_loss, smooth_loss=smooth_loss)
 
             if writer is not None:
-                writer.add_scalar('Loss/Validation', loss_item, global_step=step)
-            
+                writer.add_scalar('Loss_Sum/Validation', loss_item, global_step=step)
+                writer.add_scalar('Loss_Soft_Cut/Validation', soft_cut_loss.item(), global_step=step)
+                writer.add_scalar('Loss_Reconstruction/Validation', reconstr_loss.item(), global_step=step)
+                writer.add_scalar('Loss_Smoothing/Validation', smooth_loss.item(), global_step=step)
 
-                # if i in [0]:
-                #     mask, reconstruction = output['mask'], output['reconstruction']
-                #     mask = mask.detach().cpu().numpy()
-                #     reconstruction = reconstruction.detach().cpu().numpy()
-                #     image = image.detach().cpu().numpy()
-                #     target = target.detach().cpu().numpy()
+                # TODO: write function to visualize mask and output in eval loop
+                if i in [0]:
+                    mask, reconstruction = output['mask'], output['reconstruction'].squeeze(0)
+                    np_mask = mask.detach().cpu().numpy()
+                    np_image = image.detach().cpu().numpy()
+                    np_new_mask = crf_batch_fit_predict(np_mask, np_image)
 
-                #     new_mask = crf_batch_fit_predict(mask, image)
-                #     visualize_images = [image, target, reconstruction, mask.argmax(1), new_mask.argmax(1)]
-                #     img_grid = torchvision.utils.make_grid(visualize_images, nrow=6, normalize=True)
-                #     writer.add_image('Validation_Sample', img_grid, global_step=step)
+                    mask_viz = mask.to(device).argmax(1).float()
+                    new_mask_viz = torch.from_numpy(np_new_mask).to(device).argmax(1).float()
+                    
+                    mask_viz = argmax_to_rgb(mask_viz).unsqueeze(0)
+                    new_mask_viz = argmax_to_rgb(new_mask_viz).unsqueeze(0)
 
-        # eval_result.synchronize_between_processes()
-    return eval_result
+                    input_images = [image, target]
+                    result_images = [mask_viz, new_mask_viz]
+                    visualize_images = [image, target, reconstruction, mask_viz, new_mask_viz]
+
+                    # for img in visualize_images:
+                    #     print('--------')
+                    #     print(type(img), img.shape, img.dtype)
+                    #     print(img.min().item(), img.max().item())
+                        # print(img.unique())
+                    
+                    img_grid = torchvision.utils.make_grid(torch.cat(input_images), nrow=2, normalize=True)
+                    writer.add_image('Validation_Sample/Input_And_Target', img_grid, global_step=step)
+
+                    reconstruction = TT.img_norm(reconstruction)
+                    writer.add_image('Validation_Sample/AE_Reconstruction', reconstruction, global_step=step)
+
+                    result_grid = torchvision.utils.make_grid(torch.cat(result_images), nrow=2, normalize=True)
+                    writer.add_image('Validation_Sample/Raw_Mask_And_CRF_Mask', result_grid, global_step=step)
+    return metric_logger
 
 
 def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, device, epoch, print_freq, writer=None):
@@ -130,26 +143,27 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, devi
     header = 'Epoch: [{}]'.format(epoch)
 
     for data, i in metric_logger.log_every(data_loader, print_freq, header):
-        if args.distributed:
-            step = epoch * len(data_loader) * args.world_size + i
-        else:
-            step = epoch * len(data_loader) + i
+        step = epoch * len(data_loader.dataset) + i
 
         image, target = data['image'], data['target']
         image, target = image.to(device), target.to(device)
         output = model(image)
-        loss = criterion(output, target)
+        total_loss, soft_cut_loss, reconstr_loss, smooth_loss = criterion(output, target)
         
         optimizer.zero_grad()
-        loss.backward()
+        total_loss.backward()
         optimizer.step()
 
         lr_scheduler.step()
-        metric_logger.update(loss=loss.item(), lr=optimizer.param_groups[0]["lr"])
+        metric_logger.update(total_loss=total_loss.item(), soft_cut_loss=soft_cut_loss, reconstr_loss=reconstr_loss, smooth_loss=smooth_loss, lr=optimizer.param_groups[0]["lr"])
         if writer is not None and i % print_freq == 0:
-            writer.add_scalar('Loss/Training', loss.item(), global_step=step)
-            
+            writer.add_scalar('Loss_Sum/Training', total_loss.item(), global_step=step)
+            writer.add_scalar('Loss_Soft_Cut/Training', soft_cut_loss.item(), global_step=step)
+            writer.add_scalar('Loss_Reconstruction/Training', reconstr_loss.item(), global_step=step)
+            writer.add_scalar('Loss_Smoothing/Training', smooth_loss.item(), global_step=step)
+            writer.add_scalar('Learning_Rate', optimizer.param_groups[0]["lr"], global_step=step)
 
+# TODO get rid of this or make it useful for eval loop logging to tensorboard
 def visualize(model, dataset, device, writer=None):
     print(r'---------------------- VISUALIZE OUTPUTS ----------------------')
     idx = 0
@@ -177,12 +191,13 @@ def visualize(model, dataset, device, writer=None):
 def main(args):
     if args.output_dir:
         distributed_utils.mkdir(args.output_dir)
-
-    distributed_utils.init_distributed_mode(args)
+    # Setup for Distributed if Available, Else set args.distributed to False
+    distributed_utils.init_distributed_mode(args)   
     print(args)
-
+    # Use device from args. Locally CPU, with GPU 'cuda', with Distributed 'cuda:x' where x is gpu number
     device = torch.device(args.device)
 
+    # train=True applies augmentations to inputs such as flips and crops
     if args.no_augmentation:
         dataset = get_dataset(args.dataset, "train", get_transform(train=False))
     else:
@@ -190,6 +205,7 @@ def main(args):
     dataset_test = get_dataset(args.dataset, "val", get_transform(train=False))
     print(f'len train set: {len(dataset)} ; len test set: {len(dataset_test)}')
 
+    # Distributed mode chunks the dataset so that each worker does equal work but doesn't do extra work
     if args.distributed:
         train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)
         test_sampler = torch.utils.data.distributed.DistributedSampler(dataset_test)
@@ -197,26 +213,29 @@ def main(args):
         train_sampler = torch.utils.data.RandomSampler(dataset)
         test_sampler = torch.utils.data.SequentialSampler(dataset_test)
 
+    # Configured to fetch the correct batched data
+    # Pin Memory should help with shared CUDA data resources
     data_loader = torch.utils.data.DataLoader(
         dataset, batch_size=args.batch_size,
         sampler=train_sampler, num_workers=args.workers,
-        drop_last=True)
+        pin_memory=True, drop_last=True)
 
     data_loader_test = torch.utils.data.DataLoader(
         dataset_test, batch_size=1,
         sampler=test_sampler, num_workers=args.workers,
-        )
+        pin_memory=True)
     
+    # Initialize Model, handling distributed as needed
     model = WNet()
     model.to(device)
     if args.distributed:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
-
+    # Fetch Model weights from a checkpoint. Checkpoint saved in distributed_utils.py
     if args.checkpoint:
         checkpoint = torch.load(args.checkpoint, map_location='cpu')
         model.load_state_dict(checkpoint['model'])
-        
 
+    # For analyzing model parameters and saving the master weights
     model_without_ddp = model
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
@@ -226,11 +245,10 @@ def main(args):
     if args.no_tensorboard or ('rank' in args and args.rank != 0):
         writer = None
     else:
-        import torchvision
         from faim_tensorboard import get_faim_writer
-        
         writer = get_faim_writer(args)
- 
+
+        # Add a training image and it's target to tensorboard
         rand_select = torch.randint(0, len(dataset), (6,)).tolist()
         train_images = []
         for idx in rand_select:
@@ -239,15 +257,16 @@ def main(args):
             
             train_images.append(image)
             train_images.append(target)
-
+        
         img_grid = torchvision.utils.make_grid(train_images, nrow=6, normalize=True)
         writer.add_image('Random_Train_Sample', img_grid)
 
+        # TODO look into adding graph to tensorboard. Might need easier example
         # writer.add_graph(model_without_ddp, image.unsqueeze(0))
   
-
+    # TODO Put this in another file
     if args.test_only:
-        eval_result = evaluate(model, data_loader_test, device, writer)
+        eval_result = evaluate(model, data_loader_test, device,epoch=0, writer=writer)
         print(eval_result)
         if args.do_visualize:
             visualize(model, dataset_test, device, writer)
@@ -256,10 +275,7 @@ def main(args):
     params_to_optimize = [
         {"params": [p for p in model_without_ddp.parameters() if p.requires_grad]},
     ]
-    # if args.aux_loss:
-    #     params = [p for p in model_without_ddp.aux_classifier.parameters() if p.requires_grad]
-    #     params_to_optimize.append({"params": params, "lr": args.lr * 10})
-    
+
     if args.distributed:
         args.lr = args.lr * args.world_size
 
@@ -279,8 +295,10 @@ def main(args):
             train_sampler.set_epoch(epoch)
         train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, device, epoch, args.print_freq, writer)
         if data_loader_test is not None:
-            eval_result = evaluate(model, data_loader_test, device, epoch, writer)
-            print(eval_result)
+            result_metric_logger = evaluate(model, data_loader_test, device, epoch, writer)
+            # print(result_metric_logger)
+        else:
+            result_metric_logger = None
 
         distributed_utils.save_on_master(
             {
@@ -295,73 +313,34 @@ def main(args):
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
     if writer is not None:
+        world = args.world_size if 'rank' in args else 0
+
+        param_dict = {
+            'hp/epochs': args.epochs,
+            'hp/num_samples': len(dataset),
+            'hp/batch_size': args.batch_size,
+            'hp/lr_start': args.lr,
+            'hp/momentum': args.momentum,
+            'hp/weight_decay': args.weight_decay,
+            'hp/distributed': int(args.distributed),
+            'hp/world_size': world,
+        }
+        if result_metric_logger is not None:
+            result_dict = {
+                'res/total_loss' : getattr(result_metric_logger, "total_loss").value,
+                'res/soft_cut_loss' : getattr(result_metric_logger, "soft_cut_loss").value, 
+                'res/reconstr_loss' : getattr(result_metric_logger, "reconstr_loss").value, 
+                'res/smooth_loss' : getattr(result_metric_logger, "smooth_loss").value,
+            }
+        else:
+            result_dict = {}
+
+        writer.add_hparams(param_dict, result_dict)
+        writer.add_text('Training_Ended', f'Total Time to Train: {total_time_str}')
         writer.close()
+
     if args.do_visualize:
         visualize(model, dataset_test, device)
-
-def parse_args():
-    import argparse
-    parser = argparse.ArgumentParser(description='PyTorch Segmentation Training')
-
-    parser.add_argument('--dataset', default='overfit', help='dataset')
-    parser.add_argument('--model', default='wnet', help='model')
-    parser.add_argument('--aux-loss', action='store_true', help='auxiliar loss')
-    parser.add_argument('--device', default='cuda', help='device')
-    parser.add_argument('-b', '--batch-size', default=4, type=int)
-    parser.add_argument('-e', '--epochs', default=30, type=int, metavar='N',
-                        help='number of total epochs to run')
-
-    parser.add_argument('-j', '--workers', default=64, type=int, metavar='N',
-                        help='number of data loading workers (default: 16)')
-    parser.add_argument('--lr', default=0.01, type=float, help='initial learning rate')
-    parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
-                        help='momentum')
-    parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float,
-                        metavar='W', help='weight decay (default: 1e-4)',
-                        dest='weight_decay')
-    parser.add_argument('--print-freq', default=10, type=int, help='print frequency')
-    parser.add_argument('-o', '--output-dir', default='./output/', help='path where to save')
-    parser.add_argument('-t', '--tensorboard-dir', default='game_segmentation', help='project name to save tensorboard output')
-    parser.add_argument('-c', '--comment', default='', help='extra comment for tensorboard file name')
-    parser.add_argument('--checkpoint', default='', help='resume from checkpoint')
-    parser.add_argument(
-        "--test-only",
-        dest="test_only",
-        help="Only test the model",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--no-aug",
-        dest="no_augmentation",
-        help="Don't augment training images",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--no-tboard",
-        dest="no_tensorboard",
-        help="Don't record training to tensorboard",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--visualize",
-        dest="do_visualize",
-        help="Visualize the model outputs after train / test",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--pretrained",
-        dest="pretrained",
-        help="Use pre-trained models from the modelzoo",
-        action="store_true",
-    )
-    # distributed training parameters
-    parser.add_argument('--world-size', default=1, type=int,
-                        help='number of distributed processes')
-    parser.add_argument('--dist-url', default='env://', help='url used to set up distributed training')
-
-    args = parser.parse_args()
-    return args
-
 
 if __name__ == "__main__":
     args = parse_args()

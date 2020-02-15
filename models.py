@@ -82,6 +82,8 @@ class OutputBlock(nn.Module):
             nn.Conv2d(in_features, out_features, 3),
             nn.ReplicationPad2d(1),
             nn.Conv2d(out_features, out_features, 3),
+
+            # 1x1 convolution to map features to classes
             nn.Conv2d(out_features, out_features, 1)
         )
 

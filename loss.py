@@ -18,9 +18,12 @@ from scipy.ndimage import grey_opening
 from filters_2d import gaussian_kernel
 
 
+
 class NCutLoss2D(nn.Module):
     r"""Implementation of the continuous N-Cut loss, as in:
-    'W-Net: A Deep Model for Fully Unsupervised Image Segmentation', by Xia, Kulis (2017)"""
+    'W-Net: A Deep Model for Fully Unsupervised Image Segmentation', by Xia, Kulis (2017)
+    also based on: 'Normalized Cuts and Image Segmentation', by Shi, Jianbo (2000) 
+    """
 
     def __init__(self, radius: int = 4, sigma_1: float = 5, sigma_2: float = 1):
         r"""
@@ -48,9 +51,12 @@ class NCutLoss2D(nn.Module):
 
         for k in range(num_classes):
             # Compute the average pixel value for this class, and the difference from each pixel
+            # Sigma {u in V} {probability node u is in class k} term
             class_probs = labels[:, k].unsqueeze(1)
+            # Avoid divide by 0
             class_mean = torch.mean(inputs * class_probs, dim=(2, 3), keepdim=True) / \
                 torch.add(torch.mean(class_probs, dim=(2, 3), keepdim=True), 1e-5)
+            
             diff = (inputs - class_mean).pow(2).sum(dim=1).unsqueeze(1)
 
             # Weight the loss by the difference from the class average.

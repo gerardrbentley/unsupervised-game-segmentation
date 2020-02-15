@@ -132,6 +132,20 @@ class Normalize(object):
         target = F.normalize(target, mean=self.mean, std=self.std)
         return image, target
 
+def img_norm(image):
+    image = image.clone()
+    def norm_ip(img, min, max):
+        img.clamp_(min=min, max=max)
+        img.add_(-min).div_(max - min + 1e-5)
+
+    def norm_range(t, range):
+        if range is not None:
+            norm_ip(t, range[0], range[1])
+        else:
+            norm_ip(t, float(t.min()), float(t.max()))
+    norm_range(image, None)
+    return image
+    
 def unnormalize(tensor, mean, std, inplace=False):
     """Unnormalize a tensor image with mean and standard deviation.
     .. note::

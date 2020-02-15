@@ -40,14 +40,15 @@ class GameImagesDataset(torch.utils.data.Dataset):
 
 class GameFoldersDataset(torch.utils.data.Dataset):
     def __init__(self, root='/faim/datasets/per_game_screenshots/', train_or_val="train", transform=TT.ToTensor()):
-        self.image_folders = next(os.walk(self.image_dir))[1]
+        self.image_folders = next(os.walk(root))[1]
         sets = []
-        for game_folder in image_folders:
+        for game_folder in self.image_folders:
             sets.append(GameImagesDataset(root=os.path.join(root, game_folder), train_or_val=train_or_val, transform=transform))
         
         self.full_dataset = torch.utils.data.ConcatDataset(sets)
         if train_or_val == "val":
-            self.image_list = self.image_list[:int(len(self.image_list) * 0.2)]
+            to_chunk = int(0.2 * len(self.full_dataset))
+            self.full_dataset, _ = torch.utils.data.random_split(self.full_dataset, [to_chunk, len(self.full_dataset) - to_chunk])
         self.transform = transform
 
     def __len__(self):
