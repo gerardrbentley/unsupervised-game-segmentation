@@ -24,15 +24,14 @@ def get_dataset(name, train_or_val, transform):
     paths = {
         "overfit": ('./overfit.png', OverfitDataset),
         "test_mario": ('/faim/datasets/test_mario', GameImagesDataset),
-        "mario": ('/faim/datasets/mario_images', GameImagesDataset),
-        "blap": ('/faim/datasets/blap_images', GameFoldersDataset)
+        "mario": ('/faim/datasets/mario_images', GameFoldersDataset),
+        "blap": ('/faim/datasets/blap_images', GameFoldersDataset),
+        "icarus": ('/faim/datasets/per_game_screenshots/kid_icarus_usa_europe', GameImagesDataset)
     }
     p, ds_fn = paths[name]
 
     ds = ds_fn(root=p, train_or_val=train_or_val, transform=transform)
     return ds
-
-
 
 # TODO verify these normalizations work well for pixelated games
 DEFAULT_MEAN = [0.485, 0.456, 0.406]
