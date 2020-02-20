@@ -44,7 +44,7 @@ def get_transform(train):
     transforms = []
     if train:
         # min_size = int(0.5 * base_size)
-        max_size = int(2.0 * base_size)
+        max_size = int(2.5 * base_size)
 
         transforms.append(TT.RandomResize(base_size, max_size))
         
@@ -103,7 +103,7 @@ def evaluate(model, data_loader, device, epoch=0, writer=None):
                 writer.add_scalar('Loss_Smoothing/Validation', smooth_loss.item(), global_step=step)
 
                 # TODO: write function to visualize mask and output in eval loop
-                if i in [0]:
+                if i < 5:
                     mask, reconstruction = output['mask'], output['reconstruction'].squeeze(0)
                     np_mask = mask.detach().cpu().numpy()
                     np_image = image.detach().cpu().numpy()
@@ -126,13 +126,13 @@ def evaluate(model, data_loader, device, epoch=0, writer=None):
                         # print(img.unique())
                     
                     img_grid = torchvision.utils.make_grid(torch.cat(input_images), nrow=2, normalize=True)
-                    writer.add_image('Validation_Sample/Input_And_Target', img_grid, global_step=step)
+                    writer.add_image(f'Validation_Sample_{i}/Input_And_Target', img_grid, global_step=step)
 
                     reconstruction = TT.img_norm(reconstruction)
-                    writer.add_image('Validation_Sample/AE_Reconstruction', reconstruction, global_step=step)
+                    writer.add_image(f'Validation_Sample_{i}/AE_Reconstruction', reconstruction, global_step=step)
 
                     result_grid = torchvision.utils.make_grid(torch.cat(result_images), nrow=2, normalize=True)
-                    writer.add_image('Validation_Sample/Raw_Mask_And_CRF_Mask', result_grid, global_step=step)
+                    writer.add_image(f'Validation_Sample_{i}/Raw_Mask_And_CRF_Mask', result_grid, global_step=step)
     return metric_logger
 
 
