@@ -80,19 +80,19 @@ class OverfitDataset(torch.utils.data.Dataset):
         sample = {'image': image, 'target': target}
         return sample
 
-def get_transform(train):
+def get_dataset(name, train_or_val, transform):
+    paths = {
+        "overfit": ('./overfit.png', OverfitDataset),
+        "test_mario": ('/faim/datasets/test_mario', GameImagesDataset),
+        "mario": ('/faim/datasets/mario_images', GameFoldersDataset),
+        "blap": ('/faim/datasets/blap_images', GameFoldersDataset),
+        "icarus": ('/faim/datasets/per_game_screenshots/kid_icarus_usa_europe', GameImagesDataset),
+    }
+    p, ds_fn = paths[name]
 
-    transforms = []
-    transforms.append(TT.CenterCrop(224))
-    if train:
-        transforms.append(TT.RandomHorizontalFlip(0.5))
-        transforms.append(TT.RandomVerticalFlip(0.5))
-        # transforms.append(TT.RandomCrop(crop_size))
-    transforms.append(TT.ToTensor())
-    transforms.append(TT.Normalize(mean=[0.485, 0.456, 0.406],
-                                  std=[0.229, 0.224, 0.225]))
+    ds = ds_fn(root=p, train_or_val=train_or_val, transform=transform)
+    return ds
 
-    return TT.Compose(transforms)
 
 if __name__ == "__main__":
     print('test Game Image Dataset')
@@ -109,7 +109,7 @@ if __name__ == "__main__":
     print(f'shapes: {(image.size)}, {(target.size)}')
     print(f'extrema: [{image.getextrema()}], [{target.getextrema()}]')
 
-    do_transforms = get_transform(False)
+    do_transforms = TT.get_transform(False)
     image, target = do_transforms(image, target)
     
     print(f'Image and Target with Transform = val')

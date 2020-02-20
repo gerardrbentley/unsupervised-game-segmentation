@@ -145,47 +145,29 @@ def img_norm(image):
             norm_ip(t, float(t.min()), float(t.max()))
     norm_range(image, None)
     return image
-    
-def unnormalize(tensor, mean, std, inplace=False):
-    """Unnormalize a tensor image with mean and standard deviation.
-    .. note::
-        This transform acts out of place by default, i.e., it does not mutates the input tensor.
-    See :class:`~torchvision.transforms.Normalize` for more details.
-    Args:
-        tensor (Tensor): Tensor image of size (C, H, W) to be normalized.
-        mean (sequence): Sequence of means for each channel.
-        std (sequence): Sequence of standard deviations for each channel.
-        inplace(bool,optional): Bool to make this operation inplace.
-    Returns:
-        Tensor: Normalized Tensor image.
-    """
-    if not inplace:
-        tensor = tensor.clone()
 
-    dtype = tensor.dtype
-    mean = torch.as_tensor(mean, dtype=dtype, device=tensor.device)
-    std = torch.as_tensor(std, dtype=dtype, device=tensor.device)
-    tensor.mul_(mean[:, None, None]).add_(std[:, None, None])
-    return tensor
+# TODO verify these normalizations work well for pixelated games
+DEFAULT_MEAN = [0.485, 0.456, 0.406]
+DEFAULT_STD = [0.229, 0.224, 0.225]
+def get_transform(train):
+    base_size = 224
+    crop_size = 180
 
-class UnNormalize(object):
-    def __init__(self, mean, std):
-        self.mean = mean
-        self.std = std
-    
-    def __call__(self, image, target):
-        """
-        Args:
-            image (Tensor): Tensor image of size (C, H, W) to be normalized.
-            target (Tensor): Tensor target of size (C, H, W) to be normalized.
-        Returns:
-            image, target: Normalized image and target.
-        """
-        # for t, m, s in zip(image, self.mean, self.std):
-        #     t.mul_(s).add_(m)
+    transforms = []
+    if train:
+        # min_size = int(0.5 * base_size)
+        max_size = int(2.5 * base_size)
 
-        # for t, m, s in zip(target, self.mean, self.std):
-        #     t.mul_(s).add_(m)
-        image = unnormalize(image, mean=self.mean, std=self.std)
-        target = unnormalize(target, mean=self.mean, std=self.std)
-        return image, target
+        transforms.append(RandomResize(base_size, max_size))
+        
+        transforms.append(RandomHorizontalFlip(0.5))
+        transforms.append(RandomVerticalFlip(0.5))
+
+        transforms.append(RandomCrop(crop_size))
+
+    transforms.append(Resize(base_size))
+    transforms.append(ToTensor())
+    transforms.append(Normalize(mean=DEFAULT_MEAN,
+                                  std=DEFAULT_STD))
+
+    return Compose(transforms)

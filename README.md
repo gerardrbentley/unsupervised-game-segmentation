@@ -21,6 +21,10 @@ The following will load the model checkpoint at `saved_models/mario_overfit.pth`
 ```
 python train.py --checkpoint 'saved_models/mario_overfit.pth' --test-only --visualize
 ```
+To make sure you get your flags right you can also run the Model without training with the `evaluation.py` script (in which case the `--test-only` flag is redundant but `--visualize` still dictates if matplot lib shows a pop up visual)
+```
+python evaluation.py -cp saved_models/mario_overfit.pth --visualize
+```
 
 ## Overfit Training
 
@@ -45,13 +49,13 @@ Recommended transforms for this model:
 ```
 ** TODO ** Check the mean and std on our dataset, these are the values to Normalize over ImageNet (Or some other natural image datasets I believe)
 
-Running the command `python train.py --dataset overfit --epochs 5 --visualize --no-aug` should start the training on your machine. `python train.py --help` will show all available Command Line Flags (or look at the `parse_args()` function of `train.py`). You may need to lower --batch-size and --workers depending on your computer's computing abilities.
+Running the command `python train.py --dataset overfit --epochs 5 --no-aug` should start the training on your machine. `python train.py --help` will show all available Command Line Flags (or look at the `parse_args()` function of `ml_args.py`). You may need to lower --batch-size and --workers depending on your computer's computing abilities.
 
 ## Distributed Training
 
 Training on multiple GPUS is simple using pytorch's distributed launch.py utility
 
-`python -m torch.distributed.launch --nproc_per_node=$NUM_GPUS --use_env train.py`
+`python -m torch.distributed.launch --nproc_per_node=$NUM_GPUS --use_env train.py --relevant --training --flags`
 
 ## Resources
 

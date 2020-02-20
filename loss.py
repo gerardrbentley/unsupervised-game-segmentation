@@ -17,8 +17,6 @@ from scipy.ndimage import grey_opening
 
 from filters_2d import gaussian_kernel
 
-
-
 class NCutLoss2D(nn.Module):
     r"""Implementation of the continuous N-Cut loss, as in:
     'W-Net: A Deep Model for Fully Unsupervised Image Segmentation', by Xia, Kulis (2017)
@@ -101,3 +99,20 @@ class OpeningLoss2D(nn.Module):
             smooth_labels = smooth_labels.cuda()
 
         return nn.MSELoss()(labels, smooth_labels.detach())
+
+# TODO verify these weights from W-Net implementation
+# Weights for NCutLoss2D, MSELoss, and OpeningLoss2D, respectively
+ALPHA, BETA, GAMMA = 1e-3, 1, 1e-1
+def multi_loss(inputs, target):
+    result_masks, result_reconstructions = inputs["mask"], inputs["reconstruction"]
+    
+    result_reconstructions = result_reconstructions.contiguous()
+    target = target.contiguous()
+
+    
+    soft_cut_loss = ALPHA * NCutLoss2D()(result_masks, target)
+    reconstr_loss = BETA * nn.MSELoss()(result_reconstructions, target.detach())
+    smooth_loss = GAMMA * OpeningLoss2D()(result_masks)
+    total_loss = soft_cut_loss + reconstr_loss + smooth_loss
+    
+    return total_loss, soft_cut_loss, reconstr_loss, smooth_loss

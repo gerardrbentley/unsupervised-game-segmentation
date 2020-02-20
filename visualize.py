@@ -1,21 +1,20 @@
+from typing import Tuple, Iterable
+
+import matplotlib.pyplot as plt
+import torch
+
+from input_target_transforms import img_norm
+
 """
 Original: https://github.com/fkodom/wnet-unsupervised-image-segmentation
 Edited by Gerard
 """
-
-from typing import Tuple, Iterable
-
-import numpy as np
-import matplotlib.pyplot as plt
-import torch
-
-
 def visualize_outputs(*args: Tuple[Iterable], titles: Iterable = ()) -> None:
     r"""Helper function for visualizing arrays of related images.  Each input argument is expected to be an Iterable of
-    images -- shape:  (batch, nchan, nrow, ncol).  Will handle both RGB and grayscale images. The i-th elements from all
+    images -- shape:  (batch, nchan, nrow, ncol) or shape: (nchan, nrow, ncol).  Will handle both RGB and grayscale images. The i-th elements from all
     input arrays are displayed along a single row, with shared x- and y-axes for visualization.
 
-    :param args: Iterables of related images to display.
+    :param args: Iterables of related images to display. Suggested: List of images for each Title
     :param titles: Titles to display above each column.
     :return: None (plots the images with Matplotlib)
     """
@@ -27,10 +26,11 @@ def visualize_outputs(*args: Tuple[Iterable], titles: Iterable = ()) -> None:
 
     for i, images in enumerate(zip(*args)):
         for j, image in enumerate(images):
+            image = img_norm(image)
             if len(image.shape) < 3:
-                ax[i, j].imshow(image / image.max())
+                ax[i, j].imshow(image.detach().cpu().numpy())
             else:
-                ax[i, j].imshow(np.moveaxis(image, 0, -1) / image.max())
+                ax[i, j].imshow(image.squeeze(0).permute(1,2,0).detach().cpu().numpy())
 
     plt.show()
 
@@ -70,14 +70,3 @@ def argmax_to_rgb(mask_pred):
             # pred_image[:, mask_3d==k] = torch.tensor(kelly_rgb[k]).view(3,1)
 
     return pred_image
-
-# Source: https://pytorch.org/tutorials/intermediate/tensorboard_tutorial.html
-def matplotlib_imshow(img, one_channel=False):
-    if one_channel:
-        img = img.mean(dim=0)
-    # img = img / 2 + 0.5     # unnormalize
-    npimg = img.numpy()
-    if one_channel:
-        plt.imshow(npimg, cmap="Greys")
-    else:
-        plt.imshow(np.transpose(npimg, (1, 2, 0)))
